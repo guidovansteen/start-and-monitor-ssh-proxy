@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# start-and-monitor-ssh-proxy
+
+# Modify these environment variables according to your situation:
+
+_EXTERNAL_USER="user_01"
+_EXTERNAL_SSH_SERVER="external_proxy_server.com"
+_EXTERNAL_SSH_PORT="22"
+_LOCAL_PROXY_SERVER="127.0.0.1"
+_LOCAL_PROXY_PORT="3128"
+_EXTERNAL_PROXY_SERVER="127.0.0.1"
+_EXTERNAL_PROXY_PORT="3128"
+
+_DOWNLOAD_SITE_1="google.com"
+_DOWNLOAD_SITE_2="bbcworldnews.com"
+
+function _which_ip_address () {
+  _eth=`/sbin/ifconfig eth0 | /usr/bin/tr ":" "\n" | grep Mask | /usr/bin/tr "\ " "\n" | /bin/grep -v Mask | /bin/grep \.`
+  [[ $_eth != "" ]] && echo eth
+  _eth=`/sbin/ifconfig eth1 | /usr/bin/tr ":" "\n" | grep Mask | /usr/bin/tr "\ " "\n" | /bin/grep -v Mask | /bin/grep \.`
+  [[ $_eth != "" ]] && echo eth
+}
+
+function _download_possible () {
+  _eth=$(_which_ip_address)
+  if [[ $_eth == "" ]]; then
+    /bin/echo no
+ else
+    _FILE_TO_BE_SAVED_1="/tmp/index."$_DOWNLOAD_SITE_1
+    _FILE_TO_BE_SAVED_2="/tmp/index."$_DOWNLOAD_SITE_2
+    /bin/rm -rf $_FILE_TO_BE_SAVED_1
+    /bin/rm -rf $_FILE_TO_BE_SAVED_2
+    if [[ $1 == "no-proxy" ]]; then
+      `/usr/bin/curl --retry 3 --max-time 5 http://www.$_DOWNLOAD_SITE_1 > $_FILE_TO_BE_SAVED_1`
+      `/usr/bin/curl --retry 3 --max-time 5 http://www.$_DOWNLOAD_SITE_2 > $_FILE_TO_BE_SAVED_2`
+    elif [[ $1 == "proxy" ]]; then
+      `/usr/bin/curl --retry 3 --max-time 5 --proxy http://$_LOCAL_PROXY_SERVER:$_LOCAL_PROXY_PORT http://www.$_DOWNLOAD_SITE_1/404.html > $_FILE_TO_BE_SAVED_1`
+      `/usr/bin/curl --retry 3 --max-time 5 --proxy http://$_LOCAL_PROXY_SERVER:$_LOCAL_PROXY_PORT http://www.$_DOWNLOAD_SITE_2/404.html > $_FILE_TO_BE_SAVED_2`
+    else
+      true
+    fi
+    if [[ -s $_FILE_TO_BE_SAVED_1 || -s $_FILE_TO_BE_SAVED_2 ]] ; then
+      /bin/echo "true"
+    else
+      /bin/echo "false"
+    fi
+  fi
+}
+
+_SSH_COMMAND="/usr/bin/sudo -u $_EXTERNAL_USER /usr/bin/screen -m -d /usr/bin/ssh -v -l $_EXTERNAL_USER $_EXTERNAL_SSH_SERVER -p $_EXTERNAL_SSH_PORT -L $_LOCAL_PROXY_SERVER:$_LOCAL_PROXY_PORT:$_EXTERNAL_PROXY_SERVER:$_EXTERNAL_PROXY_PORT && echo 1"
+_KILL_SSH_COMMAND="/usr/bin/sudo -u $_EXTERNAL_USER /usr/bin/killall ssh"
+echo $($_SSH_COMMAND) | /bin/bash
+while true; do
+  network_up=$(_download_possible "no-proxy")
+  proxy_up=$(_download_possible "proxy")
+  if [[ "$network_up" == "true" ]]; then
+    if [[ "$proxy_up" == "false" ]]; then
+      echo $_KILL_SSH_COMMAND | /bin/bash
+      echo $_SSH_COMMAND | /bin/bash
+      /bin/sleep 2
+    else
+      /bin/sleep 2
+    fi
+  else
+    /bin/sleep 2
+  fi
+done
+
+exit
+
